@@ -579,34 +579,42 @@ def _transfer_instance_data(
     """
     unstructured_data = {}
 
+    should_use_serialization_name = is_data_field and not is_dto_data_type
+    nested_as_dict = destination_type is dict
+
+    # we assume that in most cases we will call these more than one so assigning them
+    # here is going to be more efficient in most cases
+    if isinstance(source_instance, Mapping):
+        get = source_instance.__getitem__  # pyright: ignore
+        has = source_instance.__contains__  # pyright: ignore
+    else:
+
+        def get(a: str) -> Any:
+            return getattr(source_instance, a)
+
+        def has(a: Any) -> bool:
+            return hasattr(source_instance, a)
+
     for field_definition in field_definitions:
-        should_use_serialization_name = is_data_field and not is_dto_data_type
         source_name = field_definition.serialization_name if should_use_serialization_name else field_definition.name
 
-        source_has_value = (
-            source_name in source_instance
-            if isinstance(source_instance, Mapping)
-            else hasattr(source_instance, source_name)
-        )
-
-        if (is_data_field and not source_has_value) or (not is_data_field and field_definition.is_excluded):
+        if not is_data_field:
+            if field_definition.is_excluded:
+                continue
+        elif not has(source_name):
             continue
 
-        transfer_type = field_definition.transfer_type
+        source_value = get(source_name)
+
+        if is_data_field and source_value is UNSET and field_definition.is_partial:
+            continue
+
         destination_name = field_definition.name if is_data_field else field_definition.serialization_name
-        source_value = (
-            source_instance[source_name]
-            if isinstance(source_instance, Mapping)
-            else getattr(source_instance, source_name)
-        )
-
-        if field_definition.is_partial and is_data_field and source_value is UNSET:
-            continue
 
         unstructured_data[destination_name] = _transfer_type_data(
             source_value=source_value,
-            transfer_type=transfer_type,
-            nested_as_dict=destination_type is dict,
+            transfer_type=field_definition.transfer_type,
+            nested_as_dict=nested_as_dict,
             is_data_field=is_data_field,
             is_dto_data_type=is_dto_data_type,
         )
